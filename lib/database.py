@@ -21,6 +21,7 @@ class Database:
             db_path: Path to the SQLite database file
         """
         self.db_path = db_path
+        self._table_columns_cache = {}  # Cache for table column names
         self._ensure_directory()
         self._initialize_schema()
     
@@ -89,7 +90,7 @@ class Database:
             
             cursor.execute("""
                 INSERT OR IGNORE INTO user_preferences (key, value, updated_at)
-                VALUES ('auto_sync_enabled', 'true', ?)
+                VALUES ('auto_sync_enabled', 'false', ?)
             """, (datetime.utcnow().isoformat(),))
             
             cursor.execute("""
@@ -130,6 +131,7 @@ class Database:
                     service_model_name_short TEXT,
                     service_status TEXT,
                     nfr INTEGER,
+                    network_update_pending INTEGER,
                     client_id TEXT,
                     synced_at TEXT,
                     raw_json TEXT
@@ -159,6 +161,15 @@ class Database:
                     client_id TEXT,
                     passphrases TEXT,
                     vss_writer_configs TEXT,
+                    alert_configs TEXT,
+                    backup_schedule TEXT,
+                    backup_schedule_active INTEGER,
+                    default_restore_settings TEXT,
+                    file_index_enabled INTEGER,
+                    local_retention_policy TEXT,
+                    timezone TEXT,
+                    volumes TEXT,
+                    volumes_include_default INTEGER,
                     synced_at TEXT,
                     raw_json TEXT
                 )
@@ -421,6 +432,11 @@ class Database:
             self._migrate_email_schedules_customization(cursor)
             self._migrate_email_schedules_timing(cursor)
             self._migrate_virtual_machines_vnc_enabled(cursor)
+            self._migrate_devices_network_update_pending(cursor)
+            self._migrate_agents_new_fields(cursor)
+            
+            # Clear column cache after migrations in case new columns were added
+            self._table_columns_cache.clear()
     
     def _migrate_snapshot_location_fields(self, cursor):
         """Add snapshot location fields to existing databases"""
@@ -530,6 +546,49 @@ Report generated at {{ generated_at }} ({{ timezone }})"""
         if 'vnc_enabled' not in existing_columns:
             cursor.execute("ALTER TABLE virtual_machines ADD COLUMN vnc_enabled INTEGER")
     
+    def _migrate_devices_network_update_pending(self, cursor):
+        """Add network_update_pending field to existing devices table"""
+        # Check if devices table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='devices'")
+        if not cursor.fetchone():
+            return
+        
+        # Get existing columns in devices table
+        cursor.execute("PRAGMA table_info(devices)")
+        existing_columns = [row[1] for row in cursor.fetchall()]
+        
+        # Add network_update_pending column if it doesn't exist
+        if 'network_update_pending' not in existing_columns:
+            cursor.execute("ALTER TABLE devices ADD COLUMN network_update_pending INTEGER")
+    
+    def _migrate_agents_new_fields(self, cursor):
+        """Add new fields to existing agents table"""
+        # Check if agents table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='agents'")
+        if not cursor.fetchone():
+            return
+        
+        # Get existing columns in agents table
+        cursor.execute("PRAGMA table_info(agents)")
+        existing_columns = [row[1] for row in cursor.fetchall()]
+        
+        # New columns to add with their types
+        new_columns = [
+            ('alert_configs', 'TEXT'),
+            ('backup_schedule', 'TEXT'),
+            ('backup_schedule_active', 'INTEGER'),
+            ('default_restore_settings', 'TEXT'),
+            ('file_index_enabled', 'INTEGER'),
+            ('local_retention_policy', 'TEXT'),
+            ('timezone', 'TEXT'),
+            ('volumes', 'TEXT'),
+            ('volumes_include_default', 'INTEGER'),
+        ]
+        
+        for col_name, col_type in new_columns:
+            if col_name not in existing_columns:
+                cursor.execute(f"ALTER TABLE agents ADD COLUMN {col_name} {col_type}")
+    
     def get_preference(self, key: str, default: Optional[str] = None) -> Optional[str]:
         """Get a user preference value"""
         with self.get_connection() as conn:
@@ -568,6 +627,38 @@ Report generated at {{ generated_at }} ({{ timezone }})"""
                 cursor.execute("SELECT * FROM sync_status ORDER BY resource_type")
             return [dict(row) for row in cursor.fetchall()]
     
+    def _get_table_columns(self, table: str) -> set:
+        """
+        Get valid column names for a table. Results are cached for performance.
+        
+        Args:
+            table: Table name
+            
+        Returns:
+            Set of column names
+        """
+        if table in self._table_columns_cache:
+            return self._table_columns_cache[table]
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = {row[1] for row in cursor.fetchall()}
+            self._table_columns_cache[table] = columns
+            return columns
+    
+    def _invalidate_table_columns_cache(self, table: str = None):
+        """
+        Invalidate the table columns cache after schema changes.
+        
+        Args:
+            table: Specific table to invalidate, or None to clear all
+        """
+        if table:
+            self._table_columns_cache.pop(table, None)
+        else:
+            self._table_columns_cache.clear()
+    
     def upsert_record(self, table: str, primary_key: str, data: Dict[str, Any]):
         """Insert or update a record in a table"""
         data['synced_at'] = datetime.utcnow().isoformat()
@@ -578,9 +669,14 @@ Report generated at {{ generated_at }} ({{ timezone }})"""
             if isinstance(value, (list, dict)) and key != 'raw_json':
                 data[key] = json.dumps(value)
         
-        columns = ', '.join(data.keys())
-        placeholders = ', '.join(['?' for _ in data])
-        update_clause = ', '.join([f"{k} = excluded.{k}" for k in data.keys()])
+        # Filter data to only include columns that exist in the table
+        # This prevents errors when API adds new fields not in our schema
+        valid_columns = self._get_table_columns(table)
+        filtered_data = {k: v for k, v in data.items() if k in valid_columns}
+        
+        columns = ', '.join(filtered_data.keys())
+        placeholders = ', '.join(['?' for _ in filtered_data])
+        update_clause = ', '.join([f"{k} = excluded.{k}" for k in filtered_data.keys()])
         
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -589,7 +685,7 @@ Report generated at {{ generated_at }} ({{ timezone }})"""
                 VALUES ({placeholders})
                 ON CONFLICT({primary_key})
                 DO UPDATE SET {update_clause}
-            """, list(data.values()))
+            """, list(filtered_data.values()))
     
     def get_records(self, table: str, where: Optional[str] = None, 
                    params: Optional[tuple] = None, order_by: Optional[str] = None) -> List[Dict[str, Any]]:

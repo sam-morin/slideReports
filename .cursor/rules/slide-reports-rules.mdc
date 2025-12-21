@@ -1,0 +1,41 @@
+---
+alwaysApply: false
+---
+# Slide Reports Project Rules
+
+## Deployment & Web Server
+
+- This application uses **Apache** as the web server
+- After making changes to the web application, restart Apache with: `service apache2 restart`
+- The site is hosted at: **https://reports.slide.recipes**
+- Use a browser to verify changes after deployment
+
+## Testing
+
+- Test API key for development/testing: `tk_4xgc378i7hfe_Ww1yeInkVpxy0Y2JBlClo6IvJjCLpQzL`
+- Use this key when testing API endpoints or authentication features
+
+## Coding Standards
+
+- Do not use ternary operators in code
+- Shell scripts should be written to be idempotent (can be run multiple times safely)
+
+# Slide Reports Project Rules
+
+## Deployment & Web Server
+
+- This application uses **Apache** as the web server
+- After making changes to the web application, restart Apache with: `service apache2 restart`
+- The site is hosted at: **https://reports.slide.recipes**
+- Use a browser to verify changes after deployment
+
+## Testing
+
+- Test API key for development/testing: `tk_4xgc378i7hfe_Ww1yeInkVpxy0Y2JBlClo6IvJjCLpQzL`
+- Use this key when testing API endpoints or authentication features
+
+## Coding Standards
+
+- Do not use ternary operators in code
+- Shell scripts should be written to be idempotent (can be run multiple times safely)
+

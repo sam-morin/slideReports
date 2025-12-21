@@ -31,6 +31,9 @@ class SyncEngine:
         'accounts': 'Accounts'
     }
     
+    # How long before a "syncing" status is considered stale (in minutes)
+    STALE_SYNC_THRESHOLD_MINUTES = 10
+    
     def __init__(self, api_client: SlideAPIClient, database: Database):
         """
         Initialize sync engine.
@@ -43,6 +46,78 @@ class SyncEngine:
         self.database = database
         self.current_operation = None
         self.progress_data = {}
+    
+    def recover_stale_syncs(self) -> List[str]:
+        """
+        Detect and recover from stale/interrupted sync operations.
+        
+        A sync is considered stale if it has been in 'syncing' status for longer
+        than STALE_SYNC_THRESHOLD_MINUTES.
+        
+        Returns:
+            List of resource types that were recovered
+        """
+        recovered = []
+        threshold = datetime.utcnow() - timedelta(minutes=self.STALE_SYNC_THRESHOLD_MINUTES)
+        
+        try:
+            # Get all sync statuses that are stuck in 'syncing'
+            status_list = self.database.get_sync_status()
+            
+            for status in status_list:
+                if status.get('status') == 'syncing':
+                    resource_type = status.get('resource_type')
+                    last_sync_at = status.get('last_sync_at')
+                    
+                    if last_sync_at:
+                        try:
+                            # Parse the timestamp
+                            sync_time = datetime.fromisoformat(last_sync_at.replace('Z', '+00:00'))
+                            # Remove timezone info for comparison if present
+                            if sync_time.tzinfo is not None:
+                                sync_time = sync_time.replace(tzinfo=None)
+                            
+                            # Check if it's stale
+                            if sync_time < threshold:
+                                logger.warning(
+                                    f"Recovering stale sync for {resource_type}: "
+                                    f"started at {last_sync_at}, threshold was {threshold.isoformat()}"
+                                )
+                                self.database.update_sync_status(
+                                    resource_type, 
+                                    'interrupted', 
+                                    status.get('items_synced', 0),
+                                    'Sync was interrupted (server restart or timeout)'
+                                )
+                                recovered.append(resource_type)
+                        except (ValueError, TypeError) as e:
+                            # If we can't parse the timestamp, consider it stale
+                            logger.warning(f"Could not parse sync time for {resource_type}: {e}")
+                            self.database.update_sync_status(
+                                resource_type,
+                                'interrupted',
+                                0,
+                                'Sync was interrupted (invalid timestamp)'
+                            )
+                            recovered.append(resource_type)
+                    else:
+                        # No timestamp but status is syncing - definitely stale
+                        logger.warning(f"Recovering sync with no timestamp for {resource_type}")
+                        self.database.update_sync_status(
+                            resource_type,
+                            'interrupted',
+                            0,
+                            'Sync was interrupted (no timestamp)'
+                        )
+                        recovered.append(resource_type)
+            
+            if recovered:
+                logger.info(f"Recovered {len(recovered)} stale sync(s): {', '.join(recovered)}")
+                
+        except Exception as e:
+            logger.error(f"Error during stale sync recovery: {e}", exc_info=True)
+        
+        return recovered
     
     def sync_all(self, data_sources: Optional[List[str]] = None,
                 start_date: Optional[datetime] = None,
@@ -58,6 +133,9 @@ class SyncEngine:
         Returns:
             Dictionary with sync results
         """
+        # Recover any stale syncs before starting
+        recovered = self.recover_stale_syncs()
+        
         if data_sources is None:
             data_sources = list(self.DATA_SOURCES.keys())
         
@@ -65,7 +143,8 @@ class SyncEngine:
             'started_at': datetime.utcnow().isoformat(),
             'sources': {},
             'total_items': 0,
-            'errors': []
+            'errors': [],
+            'recovered_syncs': recovered
         }
         
         for source in data_sources:
@@ -143,7 +222,17 @@ class SyncEngine:
             return self.api_client.get_alerts(progress_callback=progress_callback)
         
         if source == 'audits':
-            return self.api_client.get_audits(start_date=start_date,
+            # Audit logs are immutable, so only fetch new ones after the latest we have
+            latest_audit_time = self._get_latest_audit_time()
+            if latest_audit_time:
+                # Use the latest audit time we have, adding 1 second to avoid re-fetching the same record
+                audit_start_date = latest_audit_time + timedelta(seconds=1)
+                logger.info(f"Skipping existing audit logs, fetching only after {audit_start_date.isoformat()}")
+            else:
+                # No existing audits, use the provided start_date
+                audit_start_date = start_date
+                
+            return self.api_client.get_audits(start_date=audit_start_date,
                                              progress_callback=progress_callback)
         
         if source == 'clients':
@@ -253,8 +342,33 @@ class SyncEngine:
         
         return snapshot_data
     
+    def _get_latest_audit_time(self) -> Optional[datetime]:
+        """
+        Get the timestamp of the most recent audit log in the database.
+        Returns None if no audit logs exist yet.
+        """
+        try:
+            result = self.database.execute_query("""
+                SELECT MAX(audit_time) as latest_time
+                FROM audits
+            """)
+            
+            if result and result[0].get('latest_time'):
+                time_str = result[0]['latest_time']
+                # Parse the ISO format timestamp
+                time_str = time_str.replace('Z', '+00:00')
+                return datetime.fromisoformat(time_str)
+            
+            return None
+        except Exception as e:
+            logger.warning(f"Could not get latest audit time: {e}")
+            return None
+    
     def get_sync_status(self) -> Dict[str, Any]:
         """Get current sync status for all sources"""
+        # Recover any stale syncs before returning status
+        self.recover_stale_syncs()
+        
         status_list = self.database.get_sync_status()
         counts = self.database.get_data_source_counts()
         

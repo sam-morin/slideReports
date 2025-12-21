@@ -81,7 +81,7 @@ def get_key_stats(api_key_hash: str) -> Dict[str, Any]:
                 last_sync = status['last_sync_at']
     
     # Get preferences
-    auto_sync_enabled = db.get_preference('auto_sync_enabled', 'true').lower() == 'true'
+    auto_sync_enabled = db.get_preference('auto_sync_enabled', 'false').lower() == 'true'
     timezone = db.get_preference('timezone', 'America/New_York')
     
     # Get database size

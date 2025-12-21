@@ -2127,7 +2127,7 @@ def api_set_auto_sync(api_key, api_key_hash):
     
     return jsonify({
         'success': True,
-        'enabled': enabled if enabled is not None else db.get_preference('auto_sync_enabled', 'true').lower() == 'true',
+        'enabled': enabled if enabled is not None else db.get_preference('auto_sync_enabled', 'false').lower() == 'true',
         'frequency_hours': frequency_hours if frequency_hours is not None else int(db.get_preference('auto_sync_frequency_hours', '1'))
     })
 
@@ -2137,7 +2137,7 @@ def api_set_auto_sync(api_key, api_key_hash):
 def api_sync_next(api_key, api_key_hash):
     """Get next scheduled sync time"""
     db = Database(get_database_path(api_key_hash))
-    auto_sync_enabled = db.get_preference('auto_sync_enabled', 'true').lower() == 'true'
+    auto_sync_enabled = db.get_preference('auto_sync_enabled', 'false').lower() == 'true'
     frequency_hours = int(db.get_preference('auto_sync_frequency_hours', '1'))
     
     # Get last sync time

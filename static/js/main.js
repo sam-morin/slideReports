@@ -2,6 +2,144 @@
  * Main JavaScript for Slide Reports System
  */
 
+// Theme Manager
+const themeManager = {
+    /**
+     * Initialize theme from localStorage or system preference
+     */
+    init() {
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) {
+            this.setTheme(savedTheme);
+        } else {
+            // Check system preference
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (prefersDark) {
+                this.setTheme('dark');
+            }
+        }
+        
+        this.updateIcon();
+        
+        // Listen for system theme changes
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+            if (!localStorage.getItem('theme')) {
+                if (e.matches) {
+                    this.setTheme('dark');
+                } else {
+                    this.setTheme('light');
+                }
+            }
+        });
+    },
+    
+    /**
+     * Set theme and persist to localStorage
+     */
+    setTheme(theme) {
+        if (theme === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        } else {
+            document.documentElement.removeAttribute('data-theme');
+        }
+        localStorage.setItem('theme', theme);
+        this.updateIcon();
+    },
+    
+    /**
+     * Toggle between light and dark themes
+     */
+    toggle() {
+        const currentTheme = document.documentElement.getAttribute('data-theme');
+        if (currentTheme === 'dark') {
+            this.setTheme('light');
+        } else {
+            this.setTheme('dark');
+        }
+    },
+    
+    /**
+     * Update the theme toggle icon
+     */
+    updateIcon() {
+        const icon = document.getElementById('theme-icon');
+        if (!icon) return;
+        
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        if (isDark) {
+            icon.className = 'bi bi-sun-fill';
+        } else {
+            icon.className = 'bi bi-moon-fill';
+        }
+    }
+};
+
+// Sidebar Manager
+const sidebarManager = {
+    /**
+     * Initialize sidebar toggle functionality
+     */
+    init() {
+        const toggleBtn = document.getElementById('sidebar-toggle');
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebar-overlay');
+        
+        // Restore collapsed state from localStorage
+        const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+        if (isCollapsed && sidebar) {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+        }
+        
+        if (toggleBtn && sidebar) {
+            toggleBtn.addEventListener('click', () => {
+                this.toggle();
+            });
+        }
+        
+        if (overlay) {
+            overlay.addEventListener('click', () => {
+                this.closeMobile();
+            });
+        }
+        
+        // Close mobile sidebar on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this.closeMobile();
+            }
+        });
+    },
+    
+    /**
+     * Toggle sidebar collapsed/expanded
+     */
+    toggle() {
+        const sidebar = document.getElementById('sidebar');
+        
+        if (sidebar) {
+            const isCollapsed = sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed', isCollapsed);
+            localStorage.setItem('sidebarCollapsed', isCollapsed);
+        }
+    },
+    
+    /**
+     * Close mobile sidebar overlay
+     */
+    closeMobile() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebar-overlay');
+        
+        if (sidebar) {
+            sidebar.classList.remove('open');
+        }
+        if (overlay) {
+            overlay.classList.remove('active');
+        }
+    }
+};
+
 // Utility Functions
 const utils = {
     /**
@@ -649,40 +787,24 @@ const reportManager = {
     }
 };
 
-// Info Banner Manager
-const bannerManager = {
-    /**
-     * Initialize banner close functionality
-     */
-    init() {
-        const banner = document.getElementById('infoBanner');
-        const closeButton = document.getElementById('closeBanner');
-        
-        if (!banner || !closeButton) {
-            return;
-        }
-        
-        // Check if banner was previously closed in this session
-        if (sessionStorage.getItem('infoBannerClosed') === 'true') {
-            banner.classList.add('hidden');
-            document.body.classList.add('banner-closed');
-        }
-        
-        // Handle close button click
-        closeButton.addEventListener('click', () => {
-            banner.classList.add('hidden');
-            document.body.classList.add('banner-closed');
-            sessionStorage.setItem('infoBannerClosed', 'true');
-        });
-    }
-};
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Slide Reports System initialized');
     
-    // Initialize banner close functionality
-    bannerManager.init();
+    // Initialize theme manager
+    themeManager.init();
+    
+    // Initialize sidebar manager
+    sidebarManager.init();
+    
+    // Set up theme toggle button
+    const themeToggle = document.getElementById('theme-toggle');
+    if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+            themeManager.toggle();
+        });
+    }
     
     // Auto-hide alerts after 5 seconds
     document.querySelectorAll('.alert:not(.alert-permanent)').forEach(alert => {
@@ -699,6 +821,7 @@ window.slideReports = {
     syncManager,
     templateManager,
     reportManager,
-    bannerManager
+    themeManager,
+    sidebarManager
 };
 

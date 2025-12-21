@@ -95,11 +95,91 @@ class EmailScheduler:
         except Exception as e:
             logger.error(f"Error checking schedules for {api_key_hash[:8]}: {e}", exc_info=True)
     
+    def _sync_before_email(self, api_key_hash: str, db: Database):
+        """Sync data with API before sending scheduled email"""
+        from .background_sync import background_sync
+        from .encryption import Encryption
+        
+        # Get the encrypted API key from the database
+        encrypted_api_key = db.get_encrypted_api_key(api_key_hash)
+        
+        if not encrypted_api_key:
+            logger.warning(f"No stored API key for {api_key_hash[:8]}, cannot sync before email")
+            return
+        
+        # Decrypt the API key
+        encryption_key = os.environ.get('ENCRYPTION_KEY')
+        if not encryption_key:
+            logger.error("ENCRYPTION_KEY not set, cannot decrypt API key")
+            return
+        
+        encryption = Encryption(encryption_key)
+        try:
+            api_key = encryption.decrypt(encrypted_api_key)
+        except Exception as e:
+            logger.error(f"Failed to decrypt API key for {api_key_hash[:8]}: {e}")
+            return
+        
+        # Check if sync is already in progress
+        sync_state = background_sync.get_sync_state(api_key_hash)
+        if sync_state.get('status') == 'syncing':
+            logger.info(f"Sync already in progress for {api_key_hash[:8]}, waiting for completion")
+            # Wait for ongoing sync to complete (with timeout)
+            import time
+            max_wait_seconds = 300  # 5 minutes
+            waited_seconds = 0
+            while sync_state.get('status') == 'syncing' and waited_seconds < max_wait_seconds:
+                time.sleep(10)
+                waited_seconds += 10
+                sync_state = background_sync.get_sync_state(api_key_hash)
+            
+            if sync_state.get('status') == 'syncing':
+                logger.warning(f"Sync still in progress after {max_wait_seconds}s, proceeding with email")
+            return
+        
+        # Trigger the sync and wait for it to complete
+        success = background_sync.start_sync(api_key, api_key_hash)
+        if success:
+            logger.info(f"Pre-email sync started for {api_key_hash[:8]}, waiting for completion")
+            # Wait for sync to complete
+            import time
+            max_wait_seconds = 300  # 5 minutes
+            waited_seconds = 0
+            while waited_seconds < max_wait_seconds:
+                time.sleep(10)
+                waited_seconds += 10
+                sync_state = background_sync.get_sync_state(api_key_hash)
+                status = sync_state.get('status')
+                
+                if status == 'completed':
+                    logger.info(f"Pre-email sync completed successfully for {api_key_hash[:8]}")
+                    break
+                elif status == 'failed':
+                    logger.warning(f"Pre-email sync failed for {api_key_hash[:8]}")
+                    break
+                elif status != 'syncing':
+                    # Unknown status, break
+                    break
+            
+            if waited_seconds >= max_wait_seconds:
+                logger.warning(f"Pre-email sync timeout after {max_wait_seconds}s for {api_key_hash[:8]}")
+        else:
+            logger.warning(f"Failed to start pre-email sync for {api_key_hash[:8]}")
+    
     def _execute_schedule(self, api_key_hash: str, schedule: dict, timezone: str):
         """Execute a single email schedule"""
         db_path = get_database_path(api_key_hash)
         db = Database(db_path)
         esm = EmailScheduleManager(db_path)
+        
+        try:
+            # Sync data before sending scheduled email
+            logger.info(f"Syncing data before sending scheduled email for {api_key_hash[:8]}")
+            self._sync_before_email(api_key_hash, db)
+            
+        except Exception as sync_error:
+            logger.warning(f"Sync failed before sending email for {api_key_hash[:8]}: {sync_error}")
+            # Continue with email even if sync fails - use existing data
         
         try:
             # Calculate date range

@@ -36,8 +36,9 @@ A Flask-based web application for generating customizable reports about Slide ba
 - **Multi-User Support**: Isolated databases per API key
 - **Timezone Support**: Display times in user's preferred timezone (defaults to Eastern)
 - **Custom Logo Upload**: Upload and use custom logos in reports (replaces default Slide logo)
-- **Modern UI/UX**: Soft badge colors, improved card layouts, visual toggle switches, and icon-based navigation
+- **Modern UI/UX**: Dark mode support, responsive sidebar navigation, soft badge colors, and icon-based navigation
 - **Custom Fonts**: Includes Datto Din font family for professional branding
+- **Template Security**: Multi-layer SSTI protection with sandboxed rendering, validation, and rate limiting
 
 ## Architecture
 
@@ -46,10 +47,13 @@ A Flask-based web application for generating customizable reports about Slide ba
 1. **Encryption Layer** (`lib/encryption.py`): AES-256-CBC encryption for API keys
 2. **Database Layer** (`lib/database.py`): SQLite with per-user isolation
 3. **API Client** (`lib/slide_api.py`): Slide API integration with pagination
-4. **Sync Engine** (`lib/sync.py`): Data synchronization with progress tracking
+4. **Sync Engine** (`lib/sync.py`): Data synchronization with progress tracking and incremental audit log fetching
 5. **Template System** (`lib/templates.py`): Template CRUD and default template
 6. **AI Generator** (`lib/ai_generator.py`): Claude integration for template generation
 7. **Report Generator** (`lib/report_generator.py`): Report creation with data queries
+8. **Template Validator** (`lib/template_validator.py`): Static analysis to block malicious patterns
+9. **Sandbox Config** (`lib/sandbox_config.py`): Jinja2 sandboxed environment for secure template rendering
+10. **Rate Limiter** (`lib/rate_limiter.py`): Rate limiting for template operations
 
 ## Installation
 
@@ -167,10 +171,12 @@ This feature:
 
 #### Auto-Sync
 
-1. Enable auto-sync from the dashboard settings
-2. Configure sync frequency (default: 1 hour)
-3. System automatically syncs data in the background
-4. View next scheduled sync time on the dashboard
+1. Auto-sync is disabled by default for new users
+2. Enable auto-sync from the dashboard settings
+3. Configure sync frequency (1, 3, 6, 12, or 24 hours)
+4. System automatically syncs data in the background when enabled
+5. Data also syncs automatically before scheduled email reports are sent
+6. View next scheduled sync time on the dashboard
 
 Data sources synced:
 - Devices
@@ -307,6 +313,29 @@ Each data source tracks specific metrics:
 - Keys stored in httpOnly cookies
 - Each user gets isolated database (filename: `{api_key_hash}.db`)
 
+### Template Security (SSTI Protection)
+
+The application includes multiple layers of protection against Server-Side Template Injection:
+
+1. **Static Analysis** (`lib/template_validator.py`):
+   - Pattern matching blocks dangerous keywords (`__class__`, `__import__`, `exec`, `eval`, etc.)
+   - Syntax validation before saving
+   - Template size limits (500KB max)
+
+2. **Sandboxed Execution** (`lib/sandbox_config.py`):
+   - Uses Jinja2's `SandboxedEnvironment`
+   - Blocks access to private attributes
+   - Restricts dangerous built-in functions
+   - Prevents module imports
+
+3. **Rate Limiting** (`lib/rate_limiter.py`):
+   - 10 template operations per hour per API key
+   - Prevents rapid exploitation attempts
+
+4. **Audit Logging**:
+   - All template create/update operations logged
+   - Validation failures logged with details
+
 ### Best Practices
 
 1. Use strong `ENCRYPTION_KEY` (32 hex characters)
@@ -314,6 +343,8 @@ Each data source tracks specific metrics:
 3. Never commit `.env` file
 4. Use HTTPS in production
 5. Regularly update dependencies
+6. Restrict `.env` file permissions to 600
+7. Restrict data directory permissions to 770
 
 ## API Endpoints
 
@@ -448,7 +479,10 @@ Templates are stored in separate database: `{api_key_hash}_templates.db`
 │   ├── email_service.py  # Email sending service
 │   ├── pdf_service.py    # PDF generation
 │   ├── admin_utils.py    # Admin utilities
-│   └── builtin_templates.py # Default templates
+│   ├── builtin_templates.py # Default templates
+│   ├── template_validator.py # Template security validation
+│   ├── sandbox_config.py # Jinja2 sandboxed environment
+│   └── rate_limiter.py   # Rate limiting for templates
 ├── templates/            # Jinja2 HTML templates
 │   ├── base.html
 │   ├── setup.html
@@ -486,7 +520,8 @@ Templates are stored in separate database: `{api_key_hash}_templates.db`
 │   ├── create-email.png
 │   ├── testReport.html   # Sample report
 │   ├── slideAPI.json
-│   └── slideLogoTemplate.png
+│   ├── slideLogoTemplate.png
+│   └── style.md          # UI style guide
 └── data/                 # SQLite databases (not in git)
 ```
 
@@ -525,6 +560,36 @@ tk_4xgc378i7hfe_Ww1yeInkVpxy0Y2JBlClo6IvJjCLpQzL
 5. Test print/PDF functionality
 
 ## Recent Updates
+
+### Version 1.3.0 - Security Hardening, Sync Optimization, and UI Refresh
+
+- **Critical Security Fix (SSTI Vulnerability)**:
+  - Fixed Server-Side Template Injection vulnerability (CVE-worthy, CVSS 9.8 → 2.0)
+  - Implemented sandboxed Jinja2 template execution
+  - Added multi-layer template validation with pattern detection
+  - Rate limiting: 10 template operations per hour per API key
+  - Comprehensive audit logging for all template operations
+  - Full backward compatibility with existing templates
+  
+- **Sync Behavior Optimizations**:
+  - Auto-sync is now **disabled by default** (was enabled)
+  - Automatic sync before sending scheduled email reports
+  - Audit log syncing optimized: only fetches new logs since last sync
+  - Reduced unnecessary API calls and improved performance
+  
+- **UI/UX Refresh**:
+  - Complete visual redesign following Slide Console style guide
+  - Dark mode support with theme toggle in header
+  - New sidebar navigation with collapsible design
+  - Updated color palette with better accessibility (4.5:1 contrast)
+  - Improved responsive layouts for mobile devices
+  - Soft badge colors and modern card styling
+  - New typography system with consistent spacing
+
+- **File System Security**:
+  - Documented security review and recommendations
+  - Process isolation with non-root execution
+  - Data file access restrictions
 
 ### Version 1.2.0 - AI Enhancements, Auto-Sync, and Custom Branding
 
@@ -581,7 +646,7 @@ tk_4xgc378i7hfe_Ww1yeInkVpxy0Y2JBlClo6IvJjCLpQzL
 
 ## Version
 
-Current version: 1.2.0
+Current version: 1.3.0
 
 ## Support
 

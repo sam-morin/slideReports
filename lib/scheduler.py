@@ -71,8 +71,8 @@ class AutoSyncScheduler:
             
             db = Database(db_path)
             
-            # Check if auto-sync is enabled
-            auto_sync_enabled = db.get_preference('auto_sync_enabled', 'true').lower() == 'true'
+            # Check if auto-sync is enabled (default: false - only sync on manual trigger or before scheduled emails)
+            auto_sync_enabled = db.get_preference('auto_sync_enabled', 'false').lower() == 'true'
             
             if not auto_sync_enabled:
                 logger.debug(f"Auto-sync disabled for {api_key_hash[:8]}")

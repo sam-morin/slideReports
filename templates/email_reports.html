@@ -5,49 +5,34 @@
 {% block extra_css %}
 <style>
     .schedule-card {
-        border: 1px solid #dee2e6;
+        border: 1px solid var(--border-default);
         border-radius: 8px;
         padding: 1.5rem;
         margin-bottom: 1rem;
+        background: var(--bg-primary);
         transition: box-shadow 0.2s;
     }
     
     .schedule-card:hover {
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        box-shadow: var(--shadow-md);
     }
     
     .badge-enabled {
-        background-color: rgba(16, 185, 129, 0.12);
-        color: #047857;
+        background-color: var(--badge-success-bg);
+        color: var(--badge-success-text);
     }
     
     .badge-disabled {
-        background-color: rgba(107, 114, 128, 0.12);
-        color: #4b5563;
+        background-color: var(--badge-neutral-bg);
+        color: var(--badge-neutral-text);
     }
     
     .date-range-badge {
-        background-color: rgba(30, 136, 229, 0.12);
-        color: #1565c0;
+        background-color: var(--badge-info-bg);
+        color: var(--badge-info-text);
         padding: 0.25rem 0.5rem;
         border-radius: 4px;
         font-size: 0.875rem;
-    }
-    
-    .loading-spinner {
-        display: none;
-        width: 1rem;
-        height: 1rem;
-        border: 2px solid #f3f3f3;
-        border-top: 2px solid #0d6efd;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-        margin-right: 0.5rem;
-    }
-    
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
     }
     
     .sending .loading-spinner {
@@ -57,7 +42,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="py-4">
+<div class="page-content">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1><i class="bi bi-envelope"></i> Email Reports</h1>
         <div>
