@@ -4,6 +4,7 @@ Slide Reports System - Main Flask Application
 import os
 import json
 import logging
+import hmac
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, redirect, url_for, make_response
 from dotenv import load_dotenv
@@ -37,6 +38,17 @@ logger = logging.getLogger(__name__)
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-change-in-production')
+
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address, # make sure your Apache server is configured to set X-Forwarded-For!
+    default_limits=['30 per minute'], # probably reasonable?
+    storage_uri="memory://", # change this to redis or memcached or something in prod!!
+    strategy="sliding-window-counter"
+)
 
 # Initialize encryption
 encryption_key = os.environ.get('ENCRYPTION_KEY')
@@ -2211,6 +2223,7 @@ def admin_page():
 
 
 @app.route('/admin/auth', methods=['POST'])
+@limiter.limit("15 per minute") # limit to 15 requests per minute, to slow down brute-force/side-channel attacks
 def admin_auth():
     """Authenticate admin"""
     admin_pass = os.environ.get('ADMIN_PASS')
@@ -2220,7 +2233,7 @@ def admin_auth():
     data = request.get_json()
     password = data.get('password')
     
-    if password == admin_pass:
+    if hmac.compare_digest(password, admin_pass): # constant-time comparison instead of string comparison to prevent ehh.. *potential* side-channel attack
         response = jsonify({'success': True})
         response.set_cookie('admin_auth', admin_pass, max_age=86400)  # 24 hours
         return response
@@ -2234,7 +2247,7 @@ def admin_toggle_auto_sync(api_key_hash):
     admin_pass = os.environ.get('ADMIN_PASS')
     auth_token = request.cookies.get('admin_auth')
     
-    if not admin_pass or auth_token != admin_pass:
+    if not admin_pass or not hmac.compare_digest(auth_token, admin_pass): # constant-time comparison instead of sting!
         return jsonify({'error': 'Unauthorized'}), 401
     
     from lib.admin_utils import toggle_auto_sync
@@ -2255,7 +2268,7 @@ def admin_delete_email_schedule(api_key_hash, schedule_id):
     admin_pass = os.environ.get('ADMIN_PASS')
     auth_token = request.cookies.get('admin_auth')
     
-    if not admin_pass or auth_token != admin_pass:
+    if not admin_pass or not hmac.compare_digest(auth_token, admin_pass): # constant-time comparison instead of sting!
         return jsonify({'error': 'Unauthorized'}), 401
     
     from lib.admin_utils import delete_email_schedule
@@ -2273,7 +2286,7 @@ def admin_delete_key(api_key_hash):
     admin_pass = os.environ.get('ADMIN_PASS')
     auth_token = request.cookies.get('admin_auth')
     
-    if not admin_pass or auth_token != admin_pass:
+    if not admin_pass or not hmac.compare_digest(auth_token, admin_pass): # constant-time comparison instead of sting!
         return jsonify({'error': 'Unauthorized'}), 401
     
     from lib.admin_utils import delete_key_data
